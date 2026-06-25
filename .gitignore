@@ -1,0 +1,8 @@
+/.agents/
+/.codex/
+/demo/
+*.ipk
+*.buildinfo
+*.manifest
+*.tmp
+*~

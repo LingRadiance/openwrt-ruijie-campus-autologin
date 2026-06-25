@@ -1,0 +1,241 @@
+#!/bin/sh
+
+SERVICE_NAME="ruijie-campus-autologin"
+CONFIG_NAME="ruijie-campus-autologin"
+TMP_DIR="/tmp/$SERVICE_NAME"
+COOKIE_JAR="$TMP_DIR/cookies.txt"
+PORTAL_BODY="$TMP_DIR/portal.html"
+LOGIN_BODY="$TMP_DIR/login.html"
+STATUS_FILE="$TMP_DIR/status"
+
+. /lib/functions.sh
+
+log() {
+	logger -t "$SERVICE_NAME" "$*"
+}
+
+write_status() {
+	local state="$1"
+	local message="$2"
+	local account="$3"
+
+	mkdir -p "$TMP_DIR"
+	cat > "$STATUS_FILE" <<-EOF
+state='$state'
+message='$message'
+account='$account'
+updated='$(date "+%Y-%m-%d %H:%M:%S")'
+EOF
+}
+
+load_config() {
+	config_load "$CONFIG_NAME"
+
+	config_get_bool enabled main enabled 0
+	config_get portal_url main portal_url "http://192.168.16.3/"
+	config_get login_path main login_path "/drcom/login"
+	config_get logout_path main logout_path "/drcom/logout"
+	config_get username main username ""
+	config_get password main password ""
+	config_get operator main operator "cmcc"
+	config_get check_interval main check_interval "15"
+	config_get login_retry_interval main login_retry_interval "60"
+	config_get connect_timeout main connect_timeout "5"
+	config_get max_time main max_time "10"
+	config_get user_agent main user_agent "Mozilla/5.0 (OpenWrt; ruijie-campus-autologin)"
+	config_get probe_url main probe_url ""
+	config_get probe_expect_code main probe_expect_code "204"
+	config_get mkkey main mkkey "123456"
+	config_get callback main callback "dr1003"
+	config_get terminal_type main terminal_type "1"
+	config_get lang main lang "zh"
+	config_get js_version main js_version "4.1.3"
+	config_get v main v "7651"
+	config_get para main para "00"
+	config_get r1 main r1 "0"
+	config_get r2 main r2 ""
+	config_get r3 main r3 "0"
+	config_get r6 main r6 "0"
+}
+
+operator_suffix() {
+	case "$1" in
+		""|"none"|"campus"|"teacher"|"continuing")
+			printf '%s' ""
+			;;
+		"cmcc"|"mobile")
+			printf '%s' "@cmcc"
+			;;
+		"unicom"|"lt")
+			printf '%s' "@unicom"
+			;;
+		"telecom"|"dx")
+			printf '%s' "@dx"
+			;;
+		@*)
+			printf '%s' "$1"
+			;;
+		*)
+			printf '%s' "$1"
+			;;
+	esac
+}
+
+login_name() {
+	local suffix
+
+	suffix="$(operator_suffix "$operator")"
+	case "$username" in
+		*@*) printf '%s' "$username" ;;
+		*) printf '%s%s' "$username" "$suffix" ;;
+	esac
+}
+
+http_get() {
+	local url="$1"
+	local output="$2"
+
+	curl -fsSL \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time "$max_time" \
+		-c "$COOKIE_JAR" \
+		-b "$COOKIE_JAR" \
+		-o "$output" \
+		"$url"
+}
+
+portal_logged_in() {
+	http_get "$portal_url" "$PORTAL_BODY" || return 1
+
+	if grep -q "Dr.COMWebLoginID_1.htm" "$PORTAL_BODY" 2>/dev/null; then
+		return 0
+	fi
+
+	if grep -q "logout" "$PORTAL_BODY" 2>/dev/null && grep -q "PostForm" "$PORTAL_BODY" 2>/dev/null; then
+		return 0
+	fi
+
+	return 1
+}
+
+probe_logged_in() {
+	local code
+
+	[ -n "$probe_url" ] || return 1
+
+	code="$(curl -sS -o /dev/null -w "%{http_code}" \
+		-L \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time "$max_time" \
+		"$probe_url" 2>/dev/null)"
+
+	[ "$code" = "$probe_expect_code" ]
+}
+
+logged_in() {
+	portal_logged_in && return 0
+	probe_logged_in && return 0
+	return 1
+}
+
+do_login() {
+	local account
+	local login_url
+
+	account="$(login_name)"
+	login_url="${portal_url%/}$login_path"
+	log "not logged in, trying drcom login as $account"
+
+	curl -fsSL \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time "$max_time" \
+		-c "$COOKIE_JAR" \
+		-b "$COOKIE_JAR" \
+		-e "$portal_url" \
+		-o "$LOGIN_BODY" \
+		--get \
+		--data-urlencode "callback=$callback" \
+		--data-urlencode "DDDDD=$account" \
+		--data-urlencode "upass=$password" \
+		--data-urlencode "R1=$r1" \
+		--data-urlencode "R2=$r2" \
+		--data-urlencode "R3=$r3" \
+		--data-urlencode "R6=$r6" \
+		--data-urlencode "para=$para" \
+		--data-urlencode "0MKKey=$mkkey" \
+		--data-urlencode "v6ip=" \
+		--data-urlencode "terminal_type=$terminal_type" \
+		--data-urlencode "lang=zh-cn" \
+		--data-urlencode "jsVersion=$js_version" \
+		--data-urlencode "v=$v" \
+		--data-urlencode "lang=$lang" \
+		"$login_url"
+}
+
+login_response_success() {
+	[ -s "$LOGIN_BODY" ] || return 1
+
+	if grep -q '"result"[[:space:]]*:[[:space:]]*1' "$LOGIN_BODY" 2>/dev/null; then
+		return 0
+	fi
+
+	return 1
+}
+
+validate_config() {
+	if [ "$enabled" != "1" ]; then
+		write_status "disabled" "Service disabled" ""
+		log "disabled, exiting"
+		exit 0
+	fi
+
+	if [ -z "$username" ] || [ -z "$password" ]; then
+		write_status "waiting_config" "Waiting for username and password" ""
+		return 1
+	fi
+
+	return 0
+}
+
+mkdir -p "$TMP_DIR"
+touch "$COOKIE_JAR"
+
+last_login_try=0
+
+while true; do
+	load_config
+	if ! validate_config; then
+		log "username or password is empty; waiting for configuration"
+		sleep "$check_interval"
+		continue
+	fi
+
+	if logged_in; then
+		write_status "online" "Already logged in" "$(login_name)"
+		sleep "$check_interval"
+		continue
+	fi
+
+	now="$(date +%s)"
+	if [ $((now - last_login_try)) -ge "$login_retry_interval" ]; then
+		last_login_try="$now"
+		if do_login; then
+			sleep 3
+			if login_response_success || logged_in; then
+				write_status "online" "Login succeeded" "$(login_name)"
+				log "login succeeded"
+			else
+				write_status "offline" "Login request finished, but login state is still offline" "$(login_name)"
+				log "login request finished, but login state is still offline"
+			fi
+		else
+			write_status "error" "Login request failed" "$(login_name)"
+			log "login request failed"
+		fi
+	fi
+
+	sleep "$check_interval"
+done

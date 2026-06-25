@@ -1,0 +1,17 @@
+{
+	"luci-app-ruijie-campus-autologin": {
+		"description": "Grant UCI access for luci-app-ruijie-campus-autologin",
+		"read": {
+			"uci": [ "ruijie-campus-autologin" ],
+			"file": {
+				"/usr/bin/ruijie-campus-autologin-ctl": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "ruijie-campus-autologin" ],
+			"file": {
+				"/usr/bin/ruijie-campus-autologin-ctl": [ "exec" ]
+			}
+		}
+	}
+}

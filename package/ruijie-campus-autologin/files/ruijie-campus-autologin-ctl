@@ -1,0 +1,209 @@
+#!/bin/sh
+
+SERVICE_NAME="ruijie-campus-autologin"
+CONFIG_NAME="ruijie-campus-autologin"
+TMP_DIR="/tmp/$SERVICE_NAME"
+STATUS_FILE="$TMP_DIR/status"
+COOKIE_JAR="$TMP_DIR/cookies.txt"
+LOGOUT_BODY="$TMP_DIR/logout.html"
+DETECT_BODY="$TMP_DIR/detect.html"
+
+. /lib/functions.sh
+
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'
+}
+
+load_config() {
+	config_load "$CONFIG_NAME"
+	config_get portal_url main portal_url "http://192.168.16.3/"
+	config_get login_path main login_path "/drcom/login"
+	config_get logout_path main logout_path "/drcom/logout"
+	config_get callback main callback "dr1003"
+	config_get mkkey main mkkey "123456"
+	config_get terminal_type main terminal_type "1"
+	config_get js_version main js_version "4.1.3"
+	config_get v main v "7651"
+	config_get para main para "00"
+	config_get connect_timeout main connect_timeout "5"
+	config_get max_time main max_time "10"
+	config_get user_agent main user_agent "Mozilla/5.0 (OpenWrt; ruijie-campus-autologin)"
+}
+
+print_status() {
+	local running="0"
+	local state="unknown"
+	local message="No status yet"
+	local account=""
+	local updated=""
+
+	pgrep -f "/usr/bin/$SERVICE_NAME" >/dev/null 2>&1 && running="1"
+
+	if [ -f "$STATUS_FILE" ]; then
+		. "$STATUS_FILE"
+	fi
+
+	printf '{"running":%s,"state":"%s","message":"%s","account":"%s","updated":"%s"}\n' \
+		"$running" \
+		"$(json_escape "$state")" \
+		"$(json_escape "$message")" \
+		"$(json_escape "$account")" \
+		"$(json_escape "$updated")"
+}
+
+logout() {
+	local logout_url
+
+	load_config
+	mkdir -p "$TMP_DIR"
+	touch "$COOKIE_JAR"
+	logout_url="${portal_url%/}$logout_path"
+
+	if curl -fsSL \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time "$max_time" \
+		-b "$COOKIE_JAR" \
+		-c "$COOKIE_JAR" \
+		-o "$LOGOUT_BODY" \
+		--get \
+		--data-urlencode "callback=$callback" \
+		--data-urlencode "jsVersion=4.1.3" \
+		--data-urlencode "v=7651" \
+		--data-urlencode "lang=zh" \
+		"$logout_url"; then
+		cat > "$STATUS_FILE" <<-EOF
+state='logged_out'
+message='Logout request sent'
+account=''
+updated='$(date "+%Y-%m-%d %H:%M:%S")'
+EOF
+		printf '{"ok":true,"message":"Logout request sent"}\n'
+	else
+		printf '{"ok":false,"message":"Logout request failed"}\n'
+		return 1
+	fi
+}
+
+first_match() {
+	local pattern="$1"
+	local file="$2"
+
+	grep -Eo "$pattern" "$file" 2>/dev/null | head -n 1
+}
+
+strip_js_value() {
+	sed "s/^[^'\"]*['\"]//; s/['\"].*$//"
+}
+
+strip_html_value() {
+	sed 's/^.*value=["'\'']//; s/["'\''].*$//'
+}
+
+detect_value_or_current() {
+	local detected="$1"
+	local current="$2"
+
+	if [ -n "$detected" ]; then
+		printf '%s' "$detected"
+	else
+		printf '%s' "$current"
+	fi
+}
+
+autodetect() {
+	local detected_login_path detected_logout_path detected_mkkey
+	local detected_callback detected_terminal_type detected_js_version
+	local detected_v detected_para random_v
+
+	load_config
+	mkdir -p "$TMP_DIR"
+
+	if ! curl -fsSL \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time "$max_time" \
+		-o "$DETECT_BODY" \
+		"$portal_url"; then
+		printf '{"ok":false,"message":"Failed to fetch portal page"}\n'
+		return 1
+	fi
+
+	if grep -q "Dr.COMWebLoginID" "$DETECT_BODY" 2>/dev/null || grep -q "/drcom/login" "$DETECT_BODY" 2>/dev/null; then
+		detected_login_path="/drcom/login"
+	else
+		detected_login_path="$(first_match "authloginpath[[:space:]]*=[[:space:]]*['\"][^'\"]+" "$DETECT_BODY" | strip_js_value)"
+	fi
+
+	if grep -q "Dr.COMWebLoginID" "$DETECT_BODY" 2>/dev/null || grep -q "/drcom/logout" "$DETECT_BODY" 2>/dev/null; then
+		detected_logout_path="/drcom/logout"
+	else
+		detected_logout_path="$(first_match "authlogoutpath[[:space:]]*=[[:space:]]*['\"][^'\"]+" "$DETECT_BODY" | strip_js_value)"
+	fi
+
+	detected_mkkey="$(first_match "name=['\"]0MKKey['\"][^>]*value=['\"][^'\"]*" "$DETECT_BODY" | strip_html_value)"
+	[ -n "$detected_mkkey" ] || detected_mkkey="$(first_match "0MKKey[=:'\"][[:space:]]*['\"]?[0-9A-Za-z_-]+" "$DETECT_BODY" | sed "s/^.*[=:'\"]//")"
+
+	detected_para="$(first_match "name=['\"]para['\"][^>]*value=['\"][^'\"]*" "$DETECT_BODY" | strip_html_value)"
+	[ -n "$detected_para" ] || detected_para="$(first_match "para[=:'\"][[:space:]]*['\"]?[0-9A-Za-z_-]+" "$DETECT_BODY" | sed "s/^.*[=:'\"]//")"
+
+	detected_terminal_type="$(first_match "terminal_type[=:'\"][[:space:]]*['\"]?[0-9]+" "$DETECT_BODY" | sed "s/^.*[=:'\"]//")"
+	[ -n "$detected_terminal_type" ] || detected_terminal_type="$(first_match "terminalidentity[[:space:]]*=[[:space:]]*[0-9]+" "$DETECT_BODY" | sed 's/^.*=//; s/[[:space:]]//g')"
+
+	detected_callback="$(first_match "callback[=:'\"][[:space:]]*['\"]?dr[0-9]+" "$DETECT_BODY" | sed "s/^.*[=:'\"]//")"
+	[ -n "$detected_callback" ] || detected_callback="$callback"
+
+	detected_js_version="$(first_match "jsVersion[=:'\"][[:space:]]*['\"]?[0-9][0-9.]*" "$DETECT_BODY" | sed "s/^.*[=:'\"]//")"
+	[ -n "$detected_js_version" ] || detected_js_version="$js_version"
+
+	detected_v="$(first_match "[?&]v=[0-9]+" "$DETECT_BODY" | sed 's/^.*=//')"
+	if [ -z "$detected_v" ]; then
+		random_v="$(date +%s)"
+		detected_v=$((random_v % 9000 + 1000))
+	fi
+
+	login_path="$(detect_value_or_current "$detected_login_path" "$login_path")"
+	logout_path="$(detect_value_or_current "$detected_logout_path" "$logout_path")"
+	mkkey="$(detect_value_or_current "$detected_mkkey" "$mkkey")"
+	terminal_type="$(detect_value_or_current "$detected_terminal_type" "$terminal_type")"
+	js_version="$(detect_value_or_current "$detected_js_version" "$js_version")"
+	v="$(detect_value_or_current "$detected_v" "$v")"
+	para="$(detect_value_or_current "$detected_para" "$para")"
+	callback="$(detect_value_or_current "$detected_callback" "$callback")"
+
+	uci set "$CONFIG_NAME.main.login_path=$login_path"
+	uci set "$CONFIG_NAME.main.logout_path=$logout_path"
+	uci set "$CONFIG_NAME.main.mkkey=$mkkey"
+	uci set "$CONFIG_NAME.main.callback=$callback"
+	uci set "$CONFIG_NAME.main.terminal_type=$terminal_type"
+	uci set "$CONFIG_NAME.main.js_version=$js_version"
+	uci set "$CONFIG_NAME.main.v=$v"
+	uci set "$CONFIG_NAME.main.para=$para"
+	uci commit "$CONFIG_NAME"
+
+	printf '{"ok":true,"login_path":"%s","logout_path":"%s","mkkey":"%s","callback":"%s","terminal_type":"%s","js_version":"%s","v":"%s","para":"%s"}\n' \
+		"$(json_escape "$login_path")" \
+		"$(json_escape "$logout_path")" \
+		"$(json_escape "$mkkey")" \
+		"$(json_escape "$callback")" \
+		"$(json_escape "$terminal_type")" \
+		"$(json_escape "$js_version")" \
+		"$(json_escape "$v")" \
+		"$(json_escape "$para")"
+}
+
+case "$1" in
+	status)
+		print_status
+		;;
+	logout)
+		logout
+		;;
+	autodetect)
+		autodetect
+		;;
+	*)
+		printf 'Usage: %s {status|logout|autodetect}\n' "$0" >&2
+		exit 1
+		;;
+esac

@@ -1,0 +1,14 @@
+{
+	"admin/services/ruijie-campus-autologin": {
+		"title": "Ruijie Campus Autologin",
+		"order": 90,
+		"action": {
+			"type": "view",
+			"path": "services/ruijie-campus-autologin"
+		},
+		"depends": {
+			"acl": [ "luci-app-ruijie-campus-autologin" ],
+			"uci": { "ruijie-campus-autologin": true }
+		}
+	}
+}
