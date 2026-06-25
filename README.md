@@ -10,7 +10,7 @@
 - 未登录时自动使用配置的账号、密码和运营商后缀发起登录。
 - 支持 Dr.COM `/drcom/login` JSONP 风格认证接口。
 - 支持自动检测并填充常见认证参数。
-- LuCI 页面已汉化，入口位于 `服务 -> Ruijie Campus Autologin`。
+- 入口位于 `服务 -> Ruijie Campus Autologin`。
 - LuCI 页面显示服务状态、登录状态、当前账号、更新时间和状态信息。
 - 支持在 LuCI 页面中手动刷新状态、自动填充参数、注销登录。
 
