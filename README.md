@@ -2,7 +2,7 @@
 
 # Ruijie Campus Autologin for OpenWrt
 
-这是一个面向 OpenWrt 的锐捷/Dr.COM 校园网自动认证软件包，包含后台自动登录服务和 LuCI 前端页面。项目默认发布语言为中文，英文标题保留用于检索和兼容国际化命名。
+这是一个面向 OpenWrt 的锐捷/Dr.COM 校园网自动认证软件包，包含后台自动登录服务和 LuCI 前端页面。
 
 ## 功能特性
 
