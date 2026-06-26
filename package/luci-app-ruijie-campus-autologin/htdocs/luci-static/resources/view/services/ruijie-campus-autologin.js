@@ -19,6 +19,10 @@ function renderStatus(data) {
 		online: '已登录',
 		offline: '未登录',
 		error: '错误',
+		checking: '检查中',
+		logging_in: '登录中',
+		login_failed: '登录失败',
+		cooling_down: '冷却等待',
 		disabled: '服务未启用',
 		waiting_config: '等待配置',
 		logged_out: '已发送注销',
@@ -47,6 +51,18 @@ function renderStatus(data) {
 			E('div', { 'class': 'tr' }, [
 				E('div', { 'class': 'td left' }, _('状态信息')),
 				E('div', { 'class': 'td left' }, data.message || '-')
+			]),
+			E('div', { 'class': 'tr' }, [
+				E('div', { 'class': 'td left' }, _('检测失败次数')),
+				E('div', { 'class': 'td left' }, String(data.check_fail_count || 0))
+			]),
+			E('div', { 'class': 'tr' }, [
+				E('div', { 'class': 'td left' }, _('登录失败次数')),
+				E('div', { 'class': 'td left' }, String(data.login_fail_count || 0))
+			]),
+			E('div', { 'class': 'tr' }, [
+				E('div', { 'class': 'td left' }, _('登录成功次数')),
+				E('div', { 'class': 'td left' }, String(data.login_success_count || 0))
 			])
 		])
 	]);
@@ -140,6 +156,15 @@ return view.extend({
 		o = s.taboption('advanced', form.Value, 'login_retry_interval', _('登录重试间隔（秒）'));
 		o.datatype = 'uinteger';
 		o.default = '60';
+
+		o = s.taboption('advanced', form.Value, 'login_failure_limit', _('连续登录失败阈值（次）'));
+		o.datatype = 'uinteger';
+		o.default = '3';
+		o.description = _('达到该次数后进入冷却等待，0 表示不启用。');
+
+		o = s.taboption('advanced', form.Value, 'failure_cooldown', _('失败冷却时间（秒）'));
+		o.datatype = 'uinteger';
+		o.default = '300';
 
 		o = s.taboption('advanced', form.Value, 'probe_url', _('外网探测地址'));
 		o.placeholder = 'http://connectivitycheck.gstatic.com/generate_204';
@@ -256,6 +281,25 @@ return view.extend({
 						}, this));
 					})
 				}, _('注销登录'))
+				,
+				' ',
+				E('button', {
+					'class': 'btn cbi-button cbi-button-action',
+					'click': ui.createHandlerFn(this, function() {
+						return fs.exec_direct('/usr/bin/ruijie-campus-autologin-ctl', [ 'events' ]).then(function(res) {
+							ui.addNotification(_('最近事件'), E('pre', { 'style': 'white-space: pre-wrap' }, res || '[]'), 'info');
+						});
+					})
+				}, _('查看最近事件')),
+				' ',
+				E('button', {
+					'class': 'btn cbi-button cbi-button-action',
+					'click': ui.createHandlerFn(this, function() {
+						return fs.exec_direct('/usr/bin/ruijie-campus-autologin-ctl', [ 'diagnose' ]).then(function(res) {
+							ui.addNotification(_('诊断结果'), E('pre', { 'style': 'white-space: pre-wrap' }, res || '{}'), 'info');
+						});
+					})
+				}, _('运行诊断'))
 			])
 		]);
 

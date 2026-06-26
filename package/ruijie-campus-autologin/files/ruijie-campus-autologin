@@ -7,11 +7,21 @@ COOKIE_JAR="$TMP_DIR/cookies.txt"
 PORTAL_BODY="$TMP_DIR/portal.html"
 LOGIN_BODY="$TMP_DIR/login.html"
 STATUS_FILE="$TMP_DIR/status"
+EVENT_LOG="$TMP_DIR/events.log"
 
 . /lib/functions.sh
 
 log() {
 	logger -t "$SERVICE_NAME" "$*"
+}
+
+append_event() {
+	local state="$1"
+	local message="$2"
+
+	mkdir -p "$TMP_DIR"
+	printf '%s | %s | %s\n' "$(date "+%Y-%m-%d %H:%M:%S")" "$state" "$message" >> "$EVENT_LOG"
+	tail -n 30 "$EVENT_LOG" > "$EVENT_LOG.tmp" 2>/dev/null && mv "$EVENT_LOG.tmp" "$EVENT_LOG"
 }
 
 write_status() {
@@ -25,7 +35,18 @@ state='$state'
 message='$message'
 account='$account'
 updated='$(date "+%Y-%m-%d %H:%M:%S")'
+check_fail_count='${check_fail_count:-0}'
+login_fail_count='${login_fail_count:-0}'
+login_success_count='${login_success_count:-0}'
+next_retry='${next_retry:-0}'
+cooldown_until='${cooldown_until:-0}'
 EOF
+
+	if [ "$state" != "$last_state" ] || [ "$message" != "$last_message" ]; then
+		append_event "$state" "$message"
+		last_state="$state"
+		last_message="$message"
+	fi
 }
 
 load_config() {
@@ -40,6 +61,8 @@ load_config() {
 	config_get operator main operator "cmcc"
 	config_get check_interval main check_interval "15"
 	config_get login_retry_interval main login_retry_interval "60"
+	config_get login_failure_limit main login_failure_limit "3"
+	config_get failure_cooldown main failure_cooldown "300"
 	config_get connect_timeout main connect_timeout "5"
 	config_get max_time main max_time "10"
 	config_get user_agent main user_agent "Mozilla/5.0 (OpenWrt; ruijie-campus-autologin)"
@@ -204,6 +227,13 @@ mkdir -p "$TMP_DIR"
 touch "$COOKIE_JAR"
 
 last_login_try=0
+next_retry=0
+cooldown_until=0
+check_fail_count=0
+login_fail_count=0
+login_success_count=0
+last_state=""
+last_message=""
 
 while true; do
 	load_config
@@ -213,28 +243,64 @@ while true; do
 		continue
 	fi
 
+	now="$(date +%s)"
+	if [ "$cooldown_until" -gt "$now" ] 2>/dev/null; then
+		next_retry="$cooldown_until"
+		write_status "cooling_down" "Too many login failures, waiting before retry" "$(login_name)"
+		sleep "$check_interval"
+		continue
+	fi
+
 	if logged_in; then
+		check_fail_count=0
+		login_fail_count=0
+		next_retry=0
+		cooldown_until=0
 		write_status "online" "Already logged in" "$(login_name)"
 		sleep "$check_interval"
 		continue
 	fi
 
-	now="$(date +%s)"
+	check_fail_count=$((check_fail_count + 1))
 	if [ $((now - last_login_try)) -ge "$login_retry_interval" ]; then
 		last_login_try="$now"
+		next_retry=$((now + login_retry_interval))
+		write_status "logging_in" "Offline detected, sending login request" "$(login_name)"
 		if do_login; then
 			sleep 3
 			if login_response_success || logged_in; then
+				check_fail_count=0
+				login_fail_count=0
+				login_success_count=$((login_success_count + 1))
+				next_retry=0
+				cooldown_until=0
 				write_status "online" "Login succeeded" "$(login_name)"
 				log "login succeeded"
 			else
-				write_status "offline" "Login request finished, but login state is still offline" "$(login_name)"
+				login_fail_count=$((login_fail_count + 1))
+				if [ "$login_failure_limit" -gt 0 ] 2>/dev/null && [ "$login_fail_count" -ge "$login_failure_limit" ]; then
+					cooldown_until=$((now + failure_cooldown))
+					next_retry="$cooldown_until"
+					write_status "cooling_down" "Login failed $login_fail_count times, entering cooldown" "$(login_name)"
+				else
+					write_status "login_failed" "Login request finished, but login state is still offline" "$(login_name)"
+				fi
 				log "login request finished, but login state is still offline"
 			fi
 		else
-			write_status "error" "Login request failed" "$(login_name)"
+			login_fail_count=$((login_fail_count + 1))
+			if [ "$login_failure_limit" -gt 0 ] 2>/dev/null && [ "$login_fail_count" -ge "$login_failure_limit" ]; then
+				cooldown_until=$((now + failure_cooldown))
+				next_retry="$cooldown_until"
+				write_status "cooling_down" "Login request failed $login_fail_count times, entering cooldown" "$(login_name)"
+			else
+				write_status "error" "Login request failed" "$(login_name)"
+			fi
 			log "login request failed"
 		fi
+	else
+		next_retry=$((last_login_try + login_retry_interval))
+		write_status "offline" "Offline detected, waiting for retry interval" "$(login_name)"
 	fi
 
 	sleep "$check_interval"

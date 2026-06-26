@@ -122,10 +122,12 @@ EOF
 }
 
 render_main() {
-	local raw_status status_json safe_portal safe_username safe_operator enabled_checked status_dot status_text
+	local raw_status raw_events status_json events_json safe_portal safe_username safe_operator enabled_checked status_dot status_text
 
 	raw_status="$(/usr/bin/ruijie-campus-autologin-ctl status 2>/dev/null)"
+	raw_events="$(/usr/bin/ruijie-campus-autologin-ctl events 2>/dev/null)"
 	status_json="$(printf '%s' "$raw_status" | html_escape)"
+	events_json="$(printf '%s' "$raw_events" | html_escape)"
 	safe_portal="$(printf '%s' "$portal_url" | html_escape)"
 	safe_username="$(printf '%s' "$username" | html_escape)"
 	safe_operator="$(printf '%s' "$operator" | html_escape)"
@@ -171,10 +173,15 @@ render_main() {
 	<pre class="status">$status_json</pre>
 	</section>
 	<section class="panel">
+	<h2>最近事件</h2>
+	<pre class="status">$events_json</pre>
+	</section>
+	<section class="panel">
 	<h2>操作</h2>
 	<div class="actions">
 	<form method="post" action="/cgi-bin/index.cgi"><input type="hidden" name="action" value="toggle"><button class="btn secondary" type="submit">切换自动登录</button></form>
 	<form method="post" action="/cgi-bin/index.cgi"><input type="hidden" name="action" value="logout"><button class="btn secondary" type="submit">注销校园网</button></form>
+	<form method="post" action="/cgi-bin/index.cgi"><input type="hidden" name="action" value="diagnose"><button class="btn secondary" type="submit">运行诊断</button></form>
 	<form method="post" action="/cgi-bin/index.cgi"><input type="hidden" name="action" value="exit"><button class="btn danger" type="submit">退出 WebUI</button></form>
 	</div>
 	</section>
@@ -243,6 +250,22 @@ case "$action" in
 		;;
 	logout)
 		/usr/bin/ruijie-campus-autologin-ctl logout >/dev/null 2>&1 || true
+		;;
+	diagnose)
+		diagnose_json="$(/usr/bin/ruijie-campus-autologin-ctl diagnose 2>/dev/null | html_escape)"
+		send_headers
+		cat <<-EOF
+		<!doctype html><html lang="zh-CN"><head><title>锐捷校园网自动认证系统 - 诊断</title>
+		$(base_head)
+		</head><body><main class="shell">
+		<section class="panel">
+		<h1>诊断结果</h1>
+		<pre class="status">$diagnose_json</pre>
+		<form method="get" action="/cgi-bin/index.cgi"><button class="btn" type="submit">返回</button></form>
+		</section>
+		</main></body></html>
+EOF
+		exit 0
 		;;
 	exit)
 		rm -f "$SESSION_DIR/$(cookie_value ruijie_session)"

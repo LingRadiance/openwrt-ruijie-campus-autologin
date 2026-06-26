@@ -4,12 +4,13 @@ SERVICE_NAME="ruijie-campus-autologin"
 CONFIG_NAME="ruijie-campus-autologin"
 TMP_DIR="/tmp/$SERVICE_NAME"
 STATUS_FILE="$TMP_DIR/status"
+EVENT_LOG="$TMP_DIR/events.log"
 COOKIE_JAR="$TMP_DIR/cookies.txt"
 LOGOUT_BODY="$TMP_DIR/logout.html"
 DETECT_BODY="$TMP_DIR/detect.html"
 UPDATE_BODY="$TMP_DIR/update.json"
 UPDATE_IPK="$TMP_DIR/update.ipk"
-VERSION="1.0.1"
+VERSION="1.1.0"
 
 . /lib/functions.sh
 
@@ -22,6 +23,8 @@ load_config() {
 	config_get portal_url main portal_url "http://192.168.16.3/"
 	config_get login_path main login_path "/drcom/login"
 	config_get logout_path main logout_path "/drcom/logout"
+	config_get probe_url main probe_url ""
+	config_get probe_expect_code main probe_expect_code "204"
 	config_get callback main callback "dr1003"
 	config_get mkkey main mkkey "123456"
 	config_get terminal_type main terminal_type "1"
@@ -47,6 +50,11 @@ print_status() {
 	local message="No status yet"
 	local account=""
 	local updated=""
+	local check_fail_count="0"
+	local login_fail_count="0"
+	local login_success_count="0"
+	local next_retry="0"
+	local cooldown_until="0"
 
 	pgrep -f "/usr/bin/$SERVICE_NAME" >/dev/null 2>&1 && running="1"
 
@@ -54,12 +62,76 @@ print_status() {
 		. "$STATUS_FILE"
 	fi
 
-	printf '{"running":%s,"state":"%s","message":"%s","account":"%s","updated":"%s"}\n' \
+	printf '{"running":%s,"state":"%s","message":"%s","account":"%s","updated":"%s","check_fail_count":%s,"login_fail_count":%s,"login_success_count":%s,"next_retry":%s,"cooldown_until":%s}\n' \
 		"$running" \
 		"$(json_escape "$state")" \
 		"$(json_escape "$message")" \
 		"$(json_escape "$account")" \
-		"$(json_escape "$updated")"
+		"$(json_escape "$updated")" \
+		"${check_fail_count:-0}" \
+		"${login_fail_count:-0}" \
+		"${login_success_count:-0}" \
+		"${next_retry:-0}" \
+		"${cooldown_until:-0}"
+}
+
+print_events() {
+	local first=1 line ts state message
+
+	printf '['
+	if [ -f "$EVENT_LOG" ]; then
+		tail -n 20 "$EVENT_LOG" | while IFS= read -r line; do
+			ts="${line%% | *}"
+			line="${line#* | }"
+			state="${line%% | *}"
+			message="${line#* | }"
+			[ "$first" = "1" ] || printf ','
+			first=0
+			printf '{"time":"%s","state":"%s","message":"%s"}' \
+				"$(json_escape "$ts")" \
+				"$(json_escape "$state")" \
+				"$(json_escape "$message")"
+		done
+	fi
+	printf ']\n'
+}
+
+diagnose() {
+	local running="0" portal_code="000" probe_code="" login_url logout_url status_json
+
+	load_config
+	pgrep -f "/usr/bin/$SERVICE_NAME" >/dev/null 2>&1 && running="1"
+	login_url="${portal_url%/}$login_path"
+	logout_url="${portal_url%/}$logout_path"
+
+	portal_code="$(curl -sS -o /dev/null -w "%{http_code}" \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time "$max_time" \
+		"$portal_url" 2>/dev/null)"
+	[ -n "$portal_code" ] || portal_code="000"
+
+	if [ -n "$probe_url" ]; then
+		probe_code="$(curl -sS -o /dev/null -w "%{http_code}" \
+			-L \
+			-A "$user_agent" \
+			--connect-timeout "$connect_timeout" \
+			--max-time "$max_time" \
+			"$probe_url" 2>/dev/null)"
+		[ -n "$probe_code" ] || probe_code="000"
+	fi
+
+	status_json="$(print_status)"
+	printf '{"ok":true,"running":%s,"portal_url":"%s","login_url":"%s","logout_url":"%s","portal_http_code":"%s","probe_url":"%s","probe_http_code":"%s","probe_expect_code":"%s","status":%s}\n' \
+		"$running" \
+		"$(json_escape "$portal_url")" \
+		"$(json_escape "$login_url")" \
+		"$(json_escape "$logout_url")" \
+		"$(json_escape "$portal_code")" \
+		"$(json_escape "$probe_url")" \
+		"$(json_escape "$probe_code")" \
+		"$(json_escape "$probe_expect_code")" \
+		"$status_json"
 }
 
 logout() {
@@ -88,7 +160,13 @@ state='logged_out'
 message='Logout request sent'
 account=''
 updated='$(date "+%Y-%m-%d %H:%M:%S")'
+check_fail_count='0'
+login_fail_count='0'
+login_success_count='0'
+next_retry='0'
+cooldown_until='0'
 EOF
+		printf '%s | %s | %s\n' "$(date "+%Y-%m-%d %H:%M:%S")" "logged_out" "Logout request sent" >> "$EVENT_LOG"
 		printf '{"ok":true,"message":"Logout request sent"}\n'
 	else
 		printf '{"ok":false,"message":"Logout request failed"}\n'
@@ -352,6 +430,12 @@ case "$1" in
 	status)
 		print_status
 		;;
+	events)
+		print_events
+		;;
+	diagnose)
+		diagnose
+		;;
 	logout)
 		logout
 		;;
@@ -378,7 +462,7 @@ case "$1" in
 		apply_settings
 		;;
 	*)
-		printf 'Usage: %s {status|logout|autodetect|version|check-update|install-update|configure-cron|scheduled-update|apply-settings}\n' "$0" >&2
+		printf 'Usage: %s {status|events|diagnose|logout|autodetect|version|check-update|install-update|configure-cron|scheduled-update|apply-settings}\n' "$0" >&2
 		exit 1
 		;;
 esac
