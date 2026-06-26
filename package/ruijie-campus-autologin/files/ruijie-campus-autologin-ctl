@@ -7,6 +7,9 @@ STATUS_FILE="$TMP_DIR/status"
 COOKIE_JAR="$TMP_DIR/cookies.txt"
 LOGOUT_BODY="$TMP_DIR/logout.html"
 DETECT_BODY="$TMP_DIR/detect.html"
+UPDATE_BODY="$TMP_DIR/update.json"
+UPDATE_IPK="$TMP_DIR/update.ipk"
+VERSION="1.0.0_alpha2"
 
 . /lib/functions.sh
 
@@ -28,6 +31,14 @@ load_config() {
 	config_get connect_timeout main connect_timeout "5"
 	config_get max_time main max_time "10"
 	config_get user_agent main user_agent "Mozilla/5.0 (OpenWrt; ruijie-campus-autologin)"
+	config_get update_source main update_source "github"
+	config_get update_mirror_url main update_mirror_url ""
+	config_get github_repo main github_repo "LingRadiance/openwrt-ruijie-campus-autologin"
+	config_get_bool update_check_enabled main update_check_enabled 0
+	config_get update_check_interval main update_check_interval "86400"
+	config_get_bool update_auto_install main update_auto_install 0
+	config_get_bool enabled main enabled 0
+	config_get_bool webui_enabled main webui_enabled 0
 }
 
 print_status() {
@@ -192,6 +203,151 @@ autodetect() {
 		"$(json_escape "$para")"
 }
 
+version_info() {
+	printf '{"current":"%s","repo":"%s","source":"%s"}\n' \
+		"$(json_escape "$VERSION")" \
+		"$(json_escape "$github_repo")" \
+		"$(json_escape "$update_source")"
+}
+
+extract_json_string() {
+	local key="$1"
+	sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
+}
+
+github_latest() {
+	local api tag asset url
+
+	api="https://api.github.com/repos/$github_repo/releases/latest"
+	curl -fsSL \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time "$max_time" \
+		-o "$UPDATE_BODY" \
+		"$api" || return 1
+
+	tag="$(extract_json_string tag_name < "$UPDATE_BODY")"
+	asset="$(grep -o 'https://[^"]*ruijie-campus-autologin_[^"]*\.ipk' "$UPDATE_BODY" | head -n 1)"
+	[ -n "$asset" ] || return 1
+
+	printf '%s\n%s\n' "$tag" "$asset"
+}
+
+mirror_latest() {
+	local meta_url tag url
+
+	[ -n "$update_mirror_url" ] || return 1
+	meta_url="${update_mirror_url%/}/latest.json"
+	curl -fsSL \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time "$max_time" \
+		-o "$UPDATE_BODY" \
+		"$meta_url" || return 1
+
+	tag="$(extract_json_string tag < "$UPDATE_BODY")"
+	url="$(extract_json_string ipk_url < "$UPDATE_BODY")"
+	[ -n "$tag" ] && [ -n "$url" ] || return 1
+	printf '%s\n%s\n' "$tag" "$url"
+}
+
+latest_update() {
+	load_config
+	case "$update_source" in
+		mirror) mirror_latest ;;
+		*) github_latest ;;
+	esac
+}
+
+check_update() {
+	local info tag url
+
+	info="$(latest_update)" || {
+		printf '{"ok":false,"message":"Failed to check update","current":"%s"}\n' "$(json_escape "$VERSION")"
+		return 1
+	}
+	tag="$(printf '%s\n' "$info" | sed -n '1p')"
+	url="$(printf '%s\n' "$info" | sed -n '2p')"
+	printf '{"ok":true,"current":"%s","latest":"%s","ipk_url":"%s","has_update":%s}\n' \
+		"$(json_escape "$VERSION")" \
+		"$(json_escape "$tag")" \
+		"$(json_escape "$url")" \
+		"$([ "v$VERSION" != "$tag" ] && [ "$VERSION" != "$tag" ] && echo true || echo false)"
+}
+
+install_update() {
+	local info url
+
+	info="$(latest_update)" || {
+		printf '{"ok":false,"message":"Failed to check update"}\n'
+		return 1
+	}
+	url="$(printf '%s\n' "$info" | sed -n '2p')"
+	curl -fsSL \
+		-A "$user_agent" \
+		--connect-timeout "$connect_timeout" \
+		--max-time 120 \
+		-o "$UPDATE_IPK" \
+		"$url" || {
+			printf '{"ok":false,"message":"Failed to download update"}\n'
+			return 1
+		}
+	if opkg install "$UPDATE_IPK" >/tmp/ruijie-campus-autologin-update.log 2>&1; then
+		printf '{"ok":true,"message":"Update installed"}\n'
+	else
+		printf '{"ok":false,"message":"Update install failed","log":"%s"}\n' \
+			"$(json_escape "$(tail -n 10 /tmp/ruijie-campus-autologin-update.log 2>/dev/null)")"
+		return 1
+	fi
+}
+
+configure_cron() {
+	local cron_file="/etc/crontabs/root"
+	local minutes command tmp
+
+	load_config
+	touch "$cron_file"
+	sed -i '\#/usr/bin/ruijie-campus-autologin-ctl scheduled-update#d' "$cron_file"
+
+	if [ "$update_check_enabled" = "1" ]; then
+		minutes=$((update_check_interval / 60))
+		[ "$minutes" -lt 5 ] && minutes=5
+		command="/usr/bin/ruijie-campus-autologin-ctl scheduled-update >/dev/null 2>&1"
+		echo "*/$minutes * * * * $command" >> "$cron_file"
+	fi
+
+	/etc/init.d/cron restart >/dev/null 2>&1 || true
+	printf '{"ok":true}\n'
+}
+
+scheduled_update() {
+	load_config
+	[ "$update_check_enabled" = "1" ] || exit 0
+	[ "$update_auto_install" = "1" ] || exit 0
+	install_update >/dev/null 2>&1 || true
+}
+
+apply_settings() {
+	load_config
+	configure_cron >/dev/null 2>&1 || true
+
+	if [ "$enabled" = "1" ]; then
+		/etc/init.d/ruijie-campus-autologin enable >/dev/null 2>&1 || true
+		/etc/init.d/ruijie-campus-autologin restart >/dev/null 2>&1 || true
+	else
+		/etc/init.d/ruijie-campus-autologin stop >/dev/null 2>&1 || true
+	fi
+
+	if [ "$webui_enabled" = "1" ]; then
+		/etc/init.d/ruijie-campus-autologin-webui enable >/dev/null 2>&1 || true
+		/etc/init.d/ruijie-campus-autologin-webui restart >/dev/null 2>&1 || true
+	else
+		/etc/init.d/ruijie-campus-autologin-webui stop >/dev/null 2>&1 || true
+	fi
+
+	printf '{"ok":true}\n'
+}
+
 case "$1" in
 	status)
 		print_status
@@ -202,8 +358,27 @@ case "$1" in
 	autodetect)
 		autodetect
 		;;
+	version)
+		load_config
+		version_info
+		;;
+	check-update)
+		check_update
+		;;
+	install-update)
+		install_update
+		;;
+	configure-cron)
+		configure_cron
+		;;
+	scheduled-update)
+		scheduled_update
+		;;
+	apply-settings)
+		apply_settings
+		;;
 	*)
-		printf 'Usage: %s {status|logout|autodetect}\n' "$0" >&2
+		printf 'Usage: %s {status|logout|autodetect|version|check-update|install-update|configure-cron|scheduled-update|apply-settings}\n' "$0" >&2
 		exit 1
 		;;
 esac

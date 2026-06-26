@@ -14,6 +14,9 @@
 - LuCI 页面显示服务状态、登录状态、当前账号、更新时间和状态信息。
 - 支持在 LuCI 页面中手动刷新状态、自动填充参数、注销登录。
 - 支持通过 WAN SSH 执行自定义指令，远程停止并禁用自动认证服务。
+- 支持可选独立 WebUI，可按需面向 LAN/WAN 端口开放，并使用独立用户名/密码保护。
+- LuCI 页面分为“常规设置”、“高级设置”、“版本设置”三个栏目。
+- 支持手动检查更新、手动安装更新和定期自动检查更新。
 
 ## 软件包结构
 
@@ -47,6 +50,12 @@ uci commit ruijie-campus-autologin
 /etc/init.d/ruijie-campus-autologin enable
 /etc/init.d/ruijie-campus-autologin restart
 ```
+
+LuCI 页面目前分为三个栏目：
+
+- `常规设置`：账号、密码、认证地址、运营商、自动登录开关、独立 WebUI 开关。
+- `高级设置`：登录/注销接口、检测间隔、认证参数、自动填充参数、远程关闭指令。
+- `版本设置`：检查更新、自动更新、GitHub 或镜像更新源。
 
 运营商字段常用值：
 
@@ -87,6 +96,56 @@ uci commit ruijie-campus-autologin
 ```
 
 注意：该功能不额外开放端口，仍然依赖 OpenWrt SSH 权限控制。请只在确有需要时开放 WAN SSH，并使用强密码或密钥登录。
+
+## 独立 WebUI
+
+除 LuCI 页面外，也可以开启独立 WebUI。该 WebUI 可用于：
+
+- 修改认证地址、账号、密码、运营商。
+- 开启或关闭自动登录。
+- 查看当前服务状态。
+- 注销登录。
+
+相关配置项：
+
+```sh
+uci set ruijie-campus-autologin.main.webui_enabled='1'
+uci set ruijie-campus-autologin.main.webui_port='9099'
+uci set ruijie-campus-autologin.main.webui_listen_lan='1'
+uci set ruijie-campus-autologin.main.webui_listen_wan='0'
+uci set ruijie-campus-autologin.main.webui_username='admin'
+uci set ruijie-campus-autologin.main.webui_password='请设置强密码'
+uci commit ruijie-campus-autologin
+/etc/init.d/ruijie-campus-autologin-webui enable
+/etc/init.d/ruijie-campus-autologin-webui restart
+```
+
+默认不启用独立 WebUI。若面向 WAN 开放，请务必设置强密码，并确保防火墙策略符合预期。
+
+## 版本更新
+
+版本设置支持：
+
+- 手动检查更新。
+- 手动拉取并安装更新。
+- 定期检查更新。
+- 发现新版本后自动安装。
+- 从 GitHub Release 或镜像站点拉取更新。
+
+GitHub 默认仓库：
+
+```text
+LingRadiance/openwrt-ruijie-campus-autologin
+```
+
+镜像站点模式需要提供 `latest.json`，示例：
+
+```json
+{
+  "tag": "v1.0.0-alpha.2",
+  "ipk_url": "https://example.com/ruijie-campus-autologin_1.0.0_alpha2_all.ipk"
+}
+```
 
 ## 自动填充参数
 

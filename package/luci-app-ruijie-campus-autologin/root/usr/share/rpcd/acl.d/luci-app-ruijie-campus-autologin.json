@@ -10,7 +10,9 @@
 		"write": {
 			"uci": [ "ruijie-campus-autologin" ],
 			"file": {
-				"/usr/bin/ruijie-campus-autologin-ctl": [ "exec" ]
+				"/usr/bin/ruijie-campus-autologin-ctl": [ "exec" ],
+				"/etc/init.d/ruijie-campus-autologin": [ "exec" ],
+				"/etc/init.d/ruijie-campus-autologin-webui": [ "exec" ]
 			}
 		}
 	}

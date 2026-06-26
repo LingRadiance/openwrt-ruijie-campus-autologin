@@ -13,7 +13,7 @@ define Package/ruijie-campus-autologin
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Ruijie campus network auto login daemon
-  DEPENDS:=+curl
+  DEPENDS:=+curl +uhttpd
 endef
 
 define Package/ruijie-campus-autologin/description
@@ -35,8 +35,11 @@ define Package/ruijie-campus-autologin/install
 	$(INSTALL_BIN) ./files/ruijie-campus-autologin-remote $(1)/usr/bin/ruijie-campus-autologin-remote
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/ruijie-campus-autologin.init $(1)/etc/init.d/ruijie-campus-autologin
+	$(INSTALL_BIN) ./files/ruijie-campus-autologin-webui.init $(1)/etc/init.d/ruijie-campus-autologin-webui
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/ruijie-campus-autologin.config $(1)/etc/config/ruijie-campus-autologin
+	$(INSTALL_DIR) $(1)/usr/share/ruijie-campus-autologin/webui/cgi-bin
+	$(INSTALL_BIN) ./files/webui-index.cgi $(1)/usr/share/ruijie-campus-autologin/webui/cgi-bin/index.cgi
 endef
 
 $(eval $(call BuildPackage,ruijie-campus-autologin))
