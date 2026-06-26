@@ -9,7 +9,7 @@ LOGOUT_BODY="$TMP_DIR/logout.html"
 DETECT_BODY="$TMP_DIR/detect.html"
 UPDATE_BODY="$TMP_DIR/update.json"
 UPDATE_IPK="$TMP_DIR/update.ipk"
-VERSION="1.0.0_alpha2"
+VERSION="1.0.0"
 
 . /lib/functions.sh
 

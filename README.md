@@ -142,8 +142,8 @@ LingRadiance/openwrt-ruijie-campus-autologin
 
 ```json
 {
-  "tag": "v1.0.0-alpha.2",
-  "ipk_url": "https://example.com/ruijie-campus-autologin_1.0.0_alpha2_all.ipk"
+  "tag": "v1.0.0",
+  "ipk_url": "https://example.com/ruijie-campus-autologin_1.0.0_all.ipk"
 }
 ```
 
