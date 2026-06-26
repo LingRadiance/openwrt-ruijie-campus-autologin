@@ -155,6 +155,13 @@ return view.extend({
 		o = s.option(form.Value, 'para', _('para'));
 		o.default = '00';
 
+		s = m.section(form.NamedSection, 'main', 'login', _('远程关闭'));
+		s.anonymous = true;
+
+		o = s.option(form.DynamicList, 'remote_command', _('允许的远程关闭指令'));
+		o.placeholder = 'stop-autologin';
+		o.description = _('当路由器 WAN 口已开启 SSH 时，可在校园内网执行：ssh root@路由器WAN地址 "ruijie-campus-autologin-remote 指令"。命中此列表中的任意指令后，服务会被停止并禁用。');
+
 		statusWrap = E('div', {}, [
 			statusNode,
 			E('div', { 'class': 'cbi-section-actions' }, [

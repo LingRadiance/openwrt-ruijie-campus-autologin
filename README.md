@@ -13,6 +13,7 @@
 - 入口位于 `服务 -> Ruijie Campus Autologin`。
 - LuCI 页面显示服务状态、登录状态、当前账号、更新时间和状态信息。
 - 支持在 LuCI 页面中手动刷新状态、自动填充参数、注销登录。
+- 支持通过 WAN SSH 执行自定义指令，远程停止并禁用自动认证服务。
 
 ## 软件包结构
 
@@ -55,6 +56,37 @@ uci commit ruijie-campus-autologin
 - `none`：不追加后缀
 
 如果账号中已经包含 `@`，脚本不会重复追加后缀。
+
+## 远程关闭服务
+
+如果路由器已经对 WAN 口开放 SSH，可以在校园内网中通过 SSH 执行自定义指令来停止并禁用本服务。
+
+默认支持的指令：
+
+- `stop-autologin`
+- `disable-autologin`
+
+执行示例：
+
+```sh
+ssh root@路由器WAN地址 "ruijie-campus-autologin-remote stop-autologin"
+```
+
+命中配置中的任意指令后，脚本会执行：
+
+- 停止 `ruijie-campus-autologin`
+- 禁用开机自启
+- 将 `/etc/config/ruijie-campus-autologin` 中的 `enabled` 改为 `0`
+- 写入状态为 `Service disabled by remote command`
+
+可以在 LuCI 页面“远程关闭”区域添加多个自定义指令。也可以通过 UCI 配置：
+
+```sh
+uci add_list ruijie-campus-autologin.main.remote_command='my-stop-command'
+uci commit ruijie-campus-autologin
+```
+
+注意：该功能不额外开放端口，仍然依赖 OpenWrt SSH 权限控制。请只在确有需要时开放 WAN SSH，并使用强密码或密钥登录。
 
 ## 自动填充参数
 

@@ -32,6 +32,7 @@ define Package/ruijie-campus-autologin/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) ./files/ruijie-campus-autologin $(1)/usr/bin/ruijie-campus-autologin
 	$(INSTALL_BIN) ./files/ruijie-campus-autologin-ctl $(1)/usr/bin/ruijie-campus-autologin-ctl
+	$(INSTALL_BIN) ./files/ruijie-campus-autologin-remote $(1)/usr/bin/ruijie-campus-autologin-remote
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/ruijie-campus-autologin.init $(1)/etc/init.d/ruijie-campus-autologin
 	$(INSTALL_DIR) $(1)/etc/config

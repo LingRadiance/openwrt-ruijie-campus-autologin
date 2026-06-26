@@ -1,0 +1,61 @@
+#!/bin/sh
+
+SERVICE_NAME="ruijie-campus-autologin"
+CONFIG_NAME="ruijie-campus-autologin"
+STATUS_FILE="/tmp/$SERVICE_NAME/status"
+
+. /lib/functions.sh
+
+input="$1"
+matched=0
+
+usage() {
+	cat <<-EOF
+Usage: $0 <remote-command>
+
+Configured commands are read from:
+  /etc/config/$CONFIG_NAME -> list remote_command
+
+Example over SSH:
+  ssh root@<router-wan-ip> '$0 stop-autologin'
+EOF
+}
+
+check_command() {
+	local cmd="$1"
+
+	[ -n "$input" ] || return 0
+	if [ "$input" = "$cmd" ]; then
+		matched=1
+	fi
+}
+
+if [ -z "$input" ] || [ "$input" = "-h" ] || [ "$input" = "--help" ]; then
+	usage
+	exit 1
+fi
+
+config_load "$CONFIG_NAME"
+config_list_foreach main remote_command check_command
+
+if [ "$matched" != "1" ]; then
+	echo "remote command rejected"
+	exit 2
+fi
+
+uci set "$CONFIG_NAME.main.enabled=0"
+uci commit "$CONFIG_NAME"
+
+/etc/init.d/$SERVICE_NAME stop >/dev/null 2>&1 || true
+/etc/init.d/$SERVICE_NAME disable >/dev/null 2>&1 || true
+
+mkdir -p "$(dirname "$STATUS_FILE")"
+cat > "$STATUS_FILE" <<-EOF
+state='disabled'
+message='Service disabled by remote command'
+account=''
+updated='$(date "+%Y-%m-%d %H:%M:%S")'
+EOF
+
+logger -t "$SERVICE_NAME" "service disabled by remote command"
+echo "ruijie-campus-autologin disabled"
