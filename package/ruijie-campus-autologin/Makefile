@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=ruijie-campus-autologin
-PKG_VERSION:=1.0.0
+PKG_VERSION:=1.0.1
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=ruijie-campus-autologin
@@ -39,6 +39,7 @@ define Package/ruijie-campus-autologin/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/ruijie-campus-autologin.config $(1)/etc/config/ruijie-campus-autologin
 	$(INSTALL_DIR) $(1)/usr/share/ruijie-campus-autologin/webui/cgi-bin
+	$(INSTALL_DATA) ./files/webui-index.html $(1)/usr/share/ruijie-campus-autologin/webui/index.html
 	$(INSTALL_BIN) ./files/webui-index.cgi $(1)/usr/share/ruijie-campus-autologin/webui/cgi-bin/index.cgi
 endef
 
